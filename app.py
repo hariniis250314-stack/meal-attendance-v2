@@ -15,8 +15,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # ----------------- App Config -----------------
-st.set_page_config(page_title="Meal Attendance – v2 (Sheet Master)", page_icon="🍽️", layout="centered")
-st.title("🍽️ Meal Attendance – v2 (Google Sheet Master)")
+st.set_page_config(page_title="Meal Attendance ", page_icon="🍽️", layout="centered")
+st.title("🍽️ Meal Attendance")
 
 # Admin password (basic gate). Change this.
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "cteagms25")
@@ -204,4 +204,5 @@ else:
 st.caption(
     "v2 – Uses Google Sheet as master. Required columns: FullName, Phone. Timezone: Asia/Kolkata."
 )
+
 
