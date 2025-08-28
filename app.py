@@ -1,13 +1,11 @@
 # app.py
-# Streamlit Meal Attendance App (v2) – Google Sheet as Master
+# Streamlit Meal Attendance App (v2) – Google Sheet as Master (secured)
 # -----------------------------------------------------------
-# What this does
 # - Reads the master list LIVE from a Google Sheet (CSV export link)
 # - Matches trainees by last 4 digits of phone
 # - Logs attendance to a local CSV (meal_log.csv)
 # - Admin panel to preview master, validate, export or clear logs
-#
-# You can later switch the log to a Google Sheet or a DB with minimal changes.
+# - Google Sheet URL is hidden from normal users; only admin can override session URL
 
 import streamlit as st
 import pandas as pd
@@ -19,14 +17,6 @@ from zoneinfo import ZoneInfo
 # ----------------- App Config -----------------
 st.set_page_config(page_title="Meal Attendance – v2 (Sheet Master)", page_icon="🍽️", layout="centered")
 st.title("🍽️ Meal Attendance – v2 (Google Sheet Master)")
-
-# 👉 Set this to your Google Sheet CSV export URL
-# Example format:
-#   https://docs.google.com/spreadsheets/d/<SHEET_ID>/export?format=csv&gid=<TAB_GID>
-GOOGLE_SHEET_CSV_URL = st.secrets.get("MASTER_SHEET_CSV_URL", "")
-DEFAULT_SHEET_PLACEHOLDER = (
-    "Paste your Google Sheet CSV export URL in the sidebar (or set MASTER_SHEET_CSV_URL in secrets)."
-)
 
 # Admin password (basic gate). Change this.
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "cteagms25")
@@ -45,7 +35,7 @@ def _clean_phone(s: str) -> str:
 
 def load_master_df(sheet_url: str) -> pd.DataFrame:
     if not sheet_url:
-        st.warning(DEFAULT_SHEET_PLACEHOLDER)
+        st.error("Master sheet URL not configured. Ask the admin to set it.")
         return pd.DataFrame(columns=sorted(REQUIRED_COLS | {"PhoneLast4", "FullNameNorm"}))
     try:
         df = pd.read_csv(sheet_url, dtype=str).fillna("")
@@ -97,27 +87,17 @@ def load_log() -> pd.DataFrame:
     return pd.DataFrame(columns=["TimestampISO", "Date", "Time", "FullName", "PhoneLast4", "EmployeeID", "TraineeID"])  # noqa: E501
 
 
-# ----------------- Sidebar Config -----------------
+def get_master_url() -> str:
+    if "sheet_url_override" in st.session_state and st.session_state["sheet_url_override"]:
+        return st.session_state["sheet_url_override"]
+    return st.secrets.get("MASTER_SHEET_CSV_URL", "")
+
+# ----------------- Sidebar (no public URL input) -----------------
 st.sidebar.header("⚙️ Configuration")
-sheet_url_input = st.sidebar.text_input("Google Sheet CSV URL", value=GOOGLE_SHEET_CSV_URL)
-if sheet_url_input and sheet_url_input != GOOGLE_SHEET_CSV_URL:
-    st.session_state["sheet_url_override"] = sheet_url_input
-
-MASTER_URL = st.session_state.get("sheet_url_override", GOOGLE_SHEET_CSV_URL)
-
-with st.sidebar.expander("ℹ️ How to get the CSV URL", expanded=False):
-    st.markdown(
-        """
-        1. Open your Google Sheet → go to the **tab** that has the master list.
-        2. Copy the Sheet URL (`.../spreadsheets/d/<SHEET_ID>/...`).
-        3. Build a CSV link like: `https://docs.google.com/spreadsheets/d/<SHEET_ID>/export?format=csv&gid=<TAB_GID>`
-           - Find **gid** from the URL when that tab is active.
-        4. Paste it above.
-        5. Required headers: **FullName, Phone**. (Optional: EmployeeID, TraineeID, BatchStart, BatchEnd)
-        """
-    )
+st.sidebar.caption("Master list source is configured by the admin.")
 
 # ----------------- Load Master -----------------
+MASTER_URL = get_master_url()
 master_df = load_master_df(MASTER_URL)
 
 # ----------------- Validation Badges -----------------
@@ -148,7 +128,7 @@ if submitted:
     if len(last4) < 4:
         st.error("Please enter exactly 4 digits.")
     elif master_df.empty:
-        st.error("Master sheet not loaded. Check the CSV URL in the sidebar.")
+        st.error("Master sheet not loaded. Admin needs to configure it.")
     else:
         matches = master_df[master_df["PhoneLast4"] == last4]
         if matches.empty:
@@ -158,7 +138,6 @@ if submitted:
             saved = append_log(row)
             st.success(f"Marked present: {saved['FullName']} at {saved['Time']}")
         else:
-            # Disambiguate by name selection
             st.warning("Multiple trainees share these last 4 digits. Please select your name:")
             options = [f"{r.FullName} (Emp:{r.EmployeeID}, Trainee:{r.TraineeID})" for _, r in matches.iterrows()]
             choice = st.selectbox("Select your name", options, index=None, placeholder="Choose...")
@@ -187,6 +166,21 @@ if admin_pwd == ADMIN_PASSWORD:
     with st.expander("Preview master (first 25 rows)"):
         st.dataframe(master_df.head(25), use_container_width=True)
 
+    with st.expander("Master data source (admin-only)"):
+        st.write("You can set a session-only override for the master source below.")
+        new_url = st.text_input(
+            "New Google Sheet CSV URL (optional override for THIS session)",
+            value="",
+            placeholder="https://docs.google.com/spreadsheets/d/.../pub?gid=0&single=true&output=csv",
+        )
+        if st.button("Use this URL for this session"):
+            if new_url.strip():
+                st.session_state["sheet_url_override"] = new_url.strip()
+                st.success("Session override set. The app will now use this URL.")
+            else:
+                st.session_state.pop("sheet_url_override", None)
+                st.info("Cleared session override. Reverting to the default (secrets).")
+
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("Export full log (CSV)"):
@@ -211,10 +205,3 @@ st.caption(
     "v2 – Uses Google Sheet as master. Required columns: FullName, Phone. Timezone: Asia/Kolkata."
 )
 
-
-# ----------------- Notes -----------------
-# 1) To keep this app separate from your original, put this file in a new repo or folder.
-# 2) Create .streamlit/secrets.toml with:
-#    [general]\nMASTER_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/<SHEET_ID>/export?format=csv&gid=<TAB_GID>"\nADMIN_PASSWORD = "change_me"
-#    (Or just paste the URL from the sidebar at runtime.)
-# 3) Later, you can switch logging to Google Sheets or a DB.
